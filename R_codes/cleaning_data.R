@@ -3,30 +3,16 @@ library(readr)
 library(dplyr)
 library(sf)
 library(tigris)
-library(tidycensus)
 
 # DFW Clean Cities Data
 data_ev_registration <- "data/ev_registration_report_20260101.xlsx"
-### excel_sheets(data_ev_registration)
 
 ## Choosing the 16 DFW Counties
 dfw_counties <- c(
-  "Collin",
-  "Dallas",
-  "Denton",
-  "Ellis",
-  "Erath",
-  "Hood",
-  "Hunt",
-  "Johnson",
-  "Kaufman",
-  "Navarro",
-  "Palo Pinto",
-  "Parker",
-  "Rockwall",
-  "Somervell",
-  "Tarrant",
-  "Wise"
+  "Collin", "Dallas", "Denton", "Ellis",
+  "Erath", "Hood", "Hunt", "Johnson",
+  "Kaufman", "Navarro", "Palo Pinto", "Parker",
+  "Rockwall", "Somervell", "Tarrant", "Wise"
 )
 
 ## County-level EV adoption rate
@@ -43,23 +29,12 @@ dfw_county_models <- read_excel(
 ) %>%
   filter(County %in% dfw_counties)
 
-## Checking Integrity
-### nrow(dfw_county_adoption)
-### nrow(dfw_county_models)
-
-### dim(dfw_county_adoption)
-### dim(dfw_county_models)
-
-### str(dfw_county_adoption)
-### colSums(is.na(dfw_county_adoption))
-
 #=======================================================================
-
-# AFDC Data
-data_ev_stations <- read_csv(
+# AFDC Data (Read the stations CSV into data_ev_stations)
+data_ev_stations <- readr::read_csv(
   "data/electric_fuel_stations_historical_day_20260101.csv",
-  col_types = cols(.default = col_character())
-  ) # to avoid error and treat all columns as strings
+  col_types = cols(.default = "c")
+)
 
 ## Locating each station by its county
 data_ev_stations <- data_ev_stations %>%
@@ -77,8 +52,6 @@ dfw_counties_borders <- tigris::counties(
   st_transform(4326) %>%
   select(County = NAME)
 
-### nrow(dfw_counties_borders)
-
 dfw_ev_stations <- st_as_sf(
   data_ev_stations,
   coords = c("Longitude", "Latitude"),
@@ -91,9 +64,6 @@ dfw_ev_stations <- st_as_sf(
   ) %>%
   filter(!is.na(County))
 
-### nrow(dfw_ev_stations)
-### unique(dfw_ev_stations$County)
-
 ## Counting charging stations by county
 dfw_ev_stations_counts <- dfw_ev_stations %>%
   st_drop_geometry() %>%
@@ -103,9 +73,6 @@ dfw_ev_stations_counts <- dfw_ev_stations %>%
     .groups = "drop"
   ) %>%
   arrange(desc(charging_stations))
-
-### nrow(dfw_ev_stations)
-### sum(dfw_ev_stations_counts$charging_stations)
 
 # Counting charging ports by county
 dfw_ev_ports_counts <- dfw_ev_stations %>%
@@ -128,23 +95,8 @@ dfw_ev_ports_counts <- dfw_ev_stations %>%
   arrange(desc(charging_ports))
 
 #=======================================================================
-
-# ACS Data
-dfw_counties_income <- tidycensus::get_acs(
-  geography = "county",
-  variables = "B19013_001",
-  state = "TX",
-  year = 2024,
-  survey = "acs5"
-  ) %>%
-  mutate(
-    County = sub(" County, Texas$", "", NAME)
-  ) %>%
-  filter(
-    County %in% dfw_counties
-  ) %>%
-  transmute(
-    County,
-    median_household_income = estimate,
-    income_moe = moe
-  )
+# ACS Data (Read from your saved CSV so it works offline without an API key)
+dfw_counties_income <- readr::read_csv(
+  "data/dfw_counties_income.csv",
+  show_col_types = FALSE
+)

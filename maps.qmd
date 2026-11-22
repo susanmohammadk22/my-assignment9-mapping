@@ -1,0 +1,300 @@
+
+---
+title: "Mapping EV Adoption Across DFW"
+format:
+  html:
+    code-fold: show
+    lightbox: true
+execute:
+  warning: false
+  message: false
+---
+
+## 1. Setup
+
+```{r}
+#| label: setup
+
+library(tidyverse)
+library(sf)
+library(tigris)
+library(ggplot2)
+library(tmap)
+library(patchwork)
+library(classInt)
+library(scales)
+
+options(tigris_use_cache = TRUE)
+
+source("R_codes/mapping_data.R")
+
+dfw_4326 <- st_transform(dfw_map, 4326)
+dfw_5070 <- st_transform(dfw_map, 5070)
+dfw_3857 <- st_transform(dfw_map, 3857)
+```
+
+## 2. Join and Check
+
+```{r}
+#| label: join-check
+
+print(missing_boundaries)
+
+nrow(dfw_map)
+
+st_geometry_type(dfw_map)
+
+dfw_5070 |>
+  st_drop_geometry() |>
+  select(
+    county,
+    adoption_rate,
+    electric_vehicles,
+    charging_stations,
+    charging_ports,
+    median_household_income
+  )
+```
+
+## 3. Comparing Map Projections
+
+```{r}
+#| label: projection-comparison
+#| fig-width: 13
+#| fig-height: 5
+
+map_theme <- theme_minimal(base_size = 10) +
+  theme(
+    plot.title = element_text(size = 10.5, face = "bold"),
+    plot.subtitle = element_text(size = 8.5, color = "grey35"),
+    axis.text.x = element_text(size = 7, angle = 30, hjust = 1),
+    axis.text.y = element_text(size = 7),
+    axis.title = element_blank(),
+    legend.position = "bottom",
+    legend.text = element_text(size = 8),
+    legend.title = element_text(size = 9),
+    plot.margin = margin(t = 8, r = 12, b = 10, l = 8)
+  )
+
+p_4326 <- ggplot(dfw_4326) +
+  geom_sf(aes(fill = adoption_rate), color = "white", linewidth = 0.3) +
+  scale_fill_viridis_c(
+    labels = percent_format(accuracy = 0.1),
+    guide = "none"
+  ) +
+  labs(
+    title = "EPSG:4326 (WGS84)",
+    subtitle = "Geographic lat/lon"
+  ) +
+  map_theme
+
+p_3857 <- ggplot(dfw_3857) +
+  geom_sf(aes(fill = adoption_rate), color = "white", linewidth = 0.3) +
+  scale_fill_viridis_c(
+    labels = percent_format(accuracy = 0.1),
+    guide = "none"
+  ) +
+  labs(
+    title = "EPSG:3857 (Web Mercator)",
+    subtitle = "Pseudo-Mercator"
+  ) +
+  map_theme
+
+p_5070 <- ggplot(dfw_5070) +
+  geom_sf(aes(fill = adoption_rate), color = "white", linewidth = 0.3) +
+  scale_fill_viridis_c(
+    name = "Adoption Rate",
+    labels = percent_format(accuracy = 0.1),
+    guide = guide_colorbar(
+      barwidth = grid::unit(9, "cm"),
+      barheight = grid::unit(0.4, "cm")
+    )
+  ) +
+  labs(
+    title = "EPSG:5070 (Conus Albers)",
+    subtitle = "Equal-area projection"
+  ) +
+  map_theme
+
+p_4326 + p_3857 + p_5070 +
+  plot_layout(ncol = 3, guides = "collect") &
+  theme(legend.position = "bottom")
+```
+
+
+## 4. EV Adoption Choropleth
+
+```{r}
+#| label: adoption-choropleth
+
+ggplot(dfw_5070) +
+  geom_sf(aes(fill = adoption_rate), color = "grey30", linewidth = 0.35) +
+  scale_fill_viridis_c(
+    option = "mako",
+    direction = -1,
+    name = "EV Adoption Rate\n(% of Vehicles)",
+    labels = percent_format(accuracy = 0.1)
+  ) +
+  labs(
+    title = "Electric Vehicle Adoption Rate Across 16 DFW Counties",
+    subtitle = "Share of registered vehicles that are electric (EPSG:5070, Conus Albers)",
+    caption = "Sources: EV Registration Report (Jan 1, 2026); US Census Bureau / tigris (2025)."
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold"),
+    legend.position = "right"
+  )
+```
+
+
+## 4.2. Comparing Classification Methods
+
+```{r}
+#| label: classification-comparison
+#| fig-width: 15
+#| fig-height: 7
+
+vals <- dfw_5070$adoption_rate
+
+format_pct_breaks <- function(brks) {
+  paste0(
+    scales::percent(head(brks, -1), accuracy = 0.1),
+    " – ",
+    scales::percent(tail(brks, -1), accuracy = 0.1)
+  )
+}
+
+brks_equal <- classIntervals(vals, n = 4, style = "equal")$brks
+brks_quantile <- classIntervals(vals, n = 4, style = "quantile")$brks
+brks_jenks <- classIntervals(vals, n = 4, style = "jenks")$brks
+
+dfw_class <- dfw_5070 |>
+  mutate(
+    cls_equal = cut(
+      adoption_rate,
+      breaks = brks_equal,
+      include.lowest = TRUE,
+      labels = format_pct_breaks(brks_equal)
+    ),
+    cls_quantile = cut(
+      adoption_rate,
+      breaks = brks_quantile,
+      include.lowest = TRUE,
+      labels = format_pct_breaks(brks_quantile)
+    ),
+    cls_jenks = cut(
+      adoption_rate,
+      breaks = brks_jenks,
+      include.lowest = TRUE,
+      labels = format_pct_breaks(brks_jenks)
+    )
+  )
+
+make_cls_map <- function(data, col_sym, title_txt) {
+
+  ggplot(data) +
+    geom_sf(
+      aes(fill = {{ col_sym }}),
+      color = "white",
+      linewidth = 0.35
+    ) +
+    scale_fill_viridis_d(
+      option = "viridis",
+      name = "EV Adoption Rate",
+      guide = guide_legend(
+        nrow = 2,
+        byrow = TRUE
+      )
+    ) +
+    labs(title = title_txt) +
+    theme_minimal(base_size = 10) +
+    theme(
+      plot.title = element_text(
+        size = 11,
+        face = "bold",
+        hjust = 0.5
+      ),
+      axis.text.x = element_text(
+        size = 7,
+        angle = 30,
+        hjust = 1
+      ),
+      axis.text.y = element_text(size = 7),
+      axis.title = element_blank(),
+      panel.grid.major = element_line(
+        color = "grey90",
+        linewidth = 0.25
+      ),
+      legend.position = "bottom",
+      legend.title = element_text(size = 8, face = "bold"),
+      legend.text = element_text(size = 7.5),
+      legend.key.width = grid::unit(0.35, "cm"),
+      legend.spacing.x = grid::unit(0.1, "cm"),
+      plot.margin = margin(8, 10, 8, 10)
+    )
+}
+
+m_equal <- make_cls_map(
+  dfw_class,
+  cls_equal,
+  "Equal Interval"
+)
+
+m_quantile <- make_cls_map(
+  dfw_class,
+  cls_quantile,
+  "Quantile"
+)
+
+m_jenks <- make_cls_map(
+  dfw_class,
+  cls_jenks,
+  "Jenks Natural Breaks"
+)
+
+m_equal + m_quantile + m_jenks +
+  plot_layout(ncol = 3)
+```
+
+
+## 5. Proportional-Symbol Map
+
+```{r}
+#| label: proportional-symbol-map
+
+dfw_centroids <- dfw_5070 |>
+  mutate(centroid = st_centroid(geometry))
+
+ggplot() +
+  geom_sf(
+    data = dfw_5070,
+    fill = "grey95",
+    color = "grey65",
+    linewidth = 0.35
+  ) +
+  geom_sf(
+    data = dfw_centroids,
+    aes(geometry = centroid, size = charging_stations),
+    color = "#0F766E",
+    fill = "#14B8A6",
+    alpha = 0.65,
+    shape = 21,
+    stroke = 0.8
+  ) +
+  scale_size_area(
+    name = "Charging Stations",
+    max_size = 14,
+    labels = comma
+  ) +
+  labs(
+    title = "Public EV Charging Stations Across DFW Counties",
+    subtitle = "Symbol area scaled to number of charging stations (EPSG:5070)",
+    caption = "Sources: AFDC Historical Fuel Stations (Jan 1, 2026); US Census Bureau / tigris (2025)."
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold"),
+    legend.position = "right"
+  )
+```
